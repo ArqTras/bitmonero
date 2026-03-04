@@ -58,6 +58,8 @@ namespace cryptonote
     bool check_hash_128(const crypto::hash &hash, difficulty_type difficulty);
     bool check_hash(const crypto::hash &hash, difficulty_type difficulty);
     difficulty_type next_difficulty(std::vector<std::uint64_t> timestamps, std::vector<difficulty_type> cumulative_difficulties, size_t target_seconds);
+    /** Same as next_difficulty but with explicit window and cut (for fast difficulty from HF 17). */
+    difficulty_type next_difficulty(std::vector<std::uint64_t> timestamps, std::vector<difficulty_type> cumulative_difficulties, size_t target_seconds, size_t window_size, size_t cut_size);
 
     std::string hex(difficulty_type v);
 }

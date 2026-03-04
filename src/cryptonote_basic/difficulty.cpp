@@ -239,6 +239,41 @@ namespace cryptonote {
     return res.convert_to<difficulty_type>();
   }
 
+  difficulty_type next_difficulty(std::vector<uint64_t> timestamps, std::vector<difficulty_type> cumulative_difficulties, size_t target_seconds, size_t window_size, size_t cut_size) {
+    if (timestamps.size() > window_size)
+    {
+      timestamps.resize(window_size);
+      cumulative_difficulties.resize(window_size);
+    }
+    size_t length = timestamps.size();
+    assert(length == cumulative_difficulties.size());
+    if (length <= 1) {
+      return 1;
+    }
+    assert(window_size >= 2 && 2 * cut_size <= window_size - 2);
+    assert(length <= window_size);
+    sort(timestamps.begin(), timestamps.end());
+    size_t cut_begin, cut_end;
+    if (length <= window_size - 2 * cut_size) {
+      cut_begin = 0;
+      cut_end = length;
+    } else {
+      cut_begin = (length - (window_size - 2 * cut_size) + 1) / 2;
+      cut_end = cut_begin + (window_size - 2 * cut_size);
+    }
+    assert(cut_begin + 2 <= cut_end && cut_end <= length);
+    uint64_t time_span = timestamps[cut_end - 1] - timestamps[cut_begin];
+    if (time_span == 0) {
+      time_span = 1;
+    }
+    difficulty_type total_work = cumulative_difficulties[cut_end - 1] - cumulative_difficulties[cut_begin];
+    assert(total_work > 0);
+    boost::multiprecision::uint256_t res = (boost::multiprecision::uint256_t(total_work) * target_seconds + time_span - 1) / time_span;
+    if (res > max128bit)
+      return 0;
+    return res.convert_to<difficulty_type>();
+  }
+
   std::string hex(difficulty_type v)
   {
     static const char chars[] = "0123456789abcdef";

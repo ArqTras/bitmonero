@@ -987,7 +987,18 @@ difficulty_type Blockchain::get_difficulty_for_next_block()
     m_difficulties = difficulties;
   }
   size_t target = get_difficulty_target();
-  difficulty_type diff = next_difficulty(timestamps, difficulties, target);
+  difficulty_type diff;
+  if (get_ideal_hard_fork_version(height) >= HF_VERSION_FAST_DIFFICULTY)
+  {
+    if (timestamps.size() > DIFFICULTY_BLOCKS_COUNT_FAST)
+    {
+      timestamps.erase(timestamps.begin(), timestamps.begin() + (timestamps.size() - DIFFICULTY_BLOCKS_COUNT_FAST));
+      difficulties.erase(difficulties.begin(), difficulties.begin() + (difficulties.size() - DIFFICULTY_BLOCKS_COUNT_FAST));
+    }
+    diff = next_difficulty(timestamps, difficulties, target, DIFFICULTY_WINDOW_FAST, DIFFICULTY_CUT_FAST);
+  }
+  else
+    diff = next_difficulty(timestamps, difficulties, target);
 
   CRITICAL_REGION_LOCAL1(m_difficulty_lock);
   m_difficulty_for_next_block_top_hash = top_hash;
@@ -1022,19 +1033,20 @@ size_t Blockchain::recalculate_difficulties(boost::optional<uint64_t> start_heig
   const uint64_t top_height = m_db->height() - 1;
   MGINFO("Recalculating difficulties from height " << start_height << " to height " << top_height);
 
+  const size_t initial_blocks = get_ideal_hard_fork_version(start_height) >= HF_VERSION_FAST_DIFFICULTY ? DIFFICULTY_BLOCKS_COUNT_FAST : DIFFICULTY_BLOCKS_COUNT;
   std::vector<uint64_t> timestamps;
   std::vector<difficulty_type> difficulties;
-  timestamps.reserve(DIFFICULTY_BLOCKS_COUNT + 1);
-  difficulties.reserve(DIFFICULTY_BLOCKS_COUNT + 1);
+  timestamps.reserve(std::max(DIFFICULTY_BLOCKS_COUNT, DIFFICULTY_BLOCKS_COUNT_FAST) + 1);
+  difficulties.reserve(std::max(DIFFICULTY_BLOCKS_COUNT, DIFFICULTY_BLOCKS_COUNT_FAST) + 1);
   if (start_height > 1)
   {
-    for (uint64_t i = 0; i < DIFFICULTY_BLOCKS_COUNT; ++i)
+    for (uint64_t i = 0; i < initial_blocks; ++i)
     {
-      uint64_t height = start_height - 1 - i;
-      if (height == 0)
+      uint64_t h = start_height - 1 - i;
+      if (h == 0)
         break;
-      timestamps.insert(timestamps.begin(), m_db->get_block_timestamp(height));
-      difficulties.insert(difficulties.begin(), m_db->get_block_cumulative_difficulty(height));
+      timestamps.insert(timestamps.begin(), m_db->get_block_timestamp(h));
+      difficulties.insert(difficulties.begin(), m_db->get_block_cumulative_difficulty(h));
     }
   }
   difficulty_type last_cum_diff = start_height <= 1 ? start_height : difficulties.back();
@@ -1042,8 +1054,19 @@ size_t Blockchain::recalculate_difficulties(boost::optional<uint64_t> start_heig
   std::vector<difficulty_type> new_cumulative_difficulties;
   for (uint64_t height = start_height; height <= top_height; ++height)
   {
+    const bool use_fast = get_ideal_hard_fork_version(height) >= HF_VERSION_FAST_DIFFICULTY;
+    const size_t blocks_count = use_fast ? DIFFICULTY_BLOCKS_COUNT_FAST : DIFFICULTY_BLOCKS_COUNT;
+
+    if (timestamps.size() > blocks_count)
+    {
+      timestamps.erase(timestamps.begin(), timestamps.begin() + (timestamps.size() - blocks_count));
+      difficulties.erase(difficulties.begin(), difficulties.begin() + (difficulties.size() - blocks_count));
+    }
+
     size_t target = get_ideal_hard_fork_version(height) < 2 ? DIFFICULTY_TARGET_V1 : DIFFICULTY_TARGET_V2;
-    difficulty_type recalculated_diff = next_difficulty(timestamps, difficulties, target);
+    difficulty_type recalculated_diff = use_fast
+      ? next_difficulty(timestamps, difficulties, target, DIFFICULTY_WINDOW_FAST, DIFFICULTY_CUT_FAST)
+      : next_difficulty(timestamps, difficulties, target);
 
     boost::multiprecision::uint256_t recalculated_cum_diff_256 = boost::multiprecision::uint256_t(recalculated_diff) + last_cum_diff;
     CHECK_AND_ASSERT_THROW_MES(recalculated_cum_diff_256 <= std::numeric_limits<difficulty_type>::max(), "Difficulty overflow!");
@@ -1071,9 +1094,9 @@ size_t Blockchain::recalculate_difficulties(boost::optional<uint64_t> start_heig
       timestamps.push_back(m_db->get_block_timestamp(height));
       difficulties.push_back(recalculated_cum_diff);
     }
-    if (timestamps.size() > DIFFICULTY_BLOCKS_COUNT)
+    if (timestamps.size() > blocks_count)
     {
-      CHECK_AND_ASSERT_THROW_MES(timestamps.size() == DIFFICULTY_BLOCKS_COUNT + 1, "Wrong timestamps size: " << timestamps.size());
+      CHECK_AND_ASSERT_THROW_MES(timestamps.size() == blocks_count + 1, "Wrong timestamps size: " << timestamps.size());
       timestamps.erase(timestamps.begin());
       difficulties.erase(difficulties.begin());
     }
@@ -1291,63 +1314,58 @@ difficulty_type Blockchain::get_next_difficulty_for_alternative_chain(const std:
   }
 
   LOG_PRINT_L3("Blockchain::" << __func__);
+  const bool use_fast = get_ideal_hard_fork_version(bei.height) >= HF_VERSION_FAST_DIFFICULTY;
+  const size_t blocks_count = use_fast ? DIFFICULTY_BLOCKS_COUNT_FAST : DIFFICULTY_BLOCKS_COUNT;
+
   std::vector<uint64_t> timestamps;
   std::vector<difficulty_type> cumulative_difficulties;
 
-  // if the alt chain isn't long enough to calculate the difficulty target
-  // based on its blocks alone, need to get more blocks from the main chain
-  if(alt_chain.size()< DIFFICULTY_BLOCKS_COUNT)
+  if (alt_chain.size() < blocks_count)
   {
     CRITICAL_REGION_LOCAL(m_blockchain_lock);
 
-    // Figure out start and stop offsets for main chain blocks
     size_t main_chain_stop_offset = alt_chain.size() ? alt_chain.front().height : bei.height;
-    size_t main_chain_count = DIFFICULTY_BLOCKS_COUNT - std::min(static_cast<size_t>(DIFFICULTY_BLOCKS_COUNT), alt_chain.size());
+    size_t main_chain_count = blocks_count - std::min(static_cast<size_t>(blocks_count), alt_chain.size());
     main_chain_count = std::min(main_chain_count, main_chain_stop_offset);
     size_t main_chain_start_offset = main_chain_stop_offset - main_chain_count;
 
-    if(!main_chain_start_offset)
-      ++main_chain_start_offset; //skip genesis block
+    if (!main_chain_start_offset)
+      ++main_chain_start_offset;
 
-    // get difficulties and timestamps from relevant main chain blocks
-    for(; main_chain_start_offset < main_chain_stop_offset; ++main_chain_start_offset)
+    for (; main_chain_start_offset < main_chain_stop_offset; ++main_chain_start_offset)
     {
       timestamps.push_back(m_db->get_block_timestamp(main_chain_start_offset));
       cumulative_difficulties.push_back(m_db->get_block_cumulative_difficulty(main_chain_start_offset));
     }
 
-    // make sure we haven't accidentally grabbed too many blocks...maybe don't need this check?
-    CHECK_AND_ASSERT_MES((alt_chain.size() + timestamps.size()) <= DIFFICULTY_BLOCKS_COUNT, false, "Internal error, alt_chain.size()[" << alt_chain.size() << "] + vtimestampsec.size()[" << timestamps.size() << "] NOT <= DIFFICULTY_WINDOW[]" << DIFFICULTY_BLOCKS_COUNT);
+    CHECK_AND_ASSERT_MES((alt_chain.size() + timestamps.size()) <= blocks_count, false, "Internal error, alt_chain.size() + timestamps.size() NOT <= blocks_count");
 
-    for (const auto &bei : alt_chain)
+    for (const auto &alt_bei : alt_chain)
     {
-      timestamps.push_back(bei.bl.timestamp);
-      cumulative_difficulties.push_back(bei.cumulative_difficulty);
+      timestamps.push_back(alt_bei.bl.timestamp);
+      cumulative_difficulties.push_back(alt_bei.cumulative_difficulty);
     }
   }
-  // if the alt chain is long enough for the difficulty calc, grab difficulties
-  // and timestamps from it alone
   else
   {
-    timestamps.resize(static_cast<size_t>(DIFFICULTY_BLOCKS_COUNT));
-    cumulative_difficulties.resize(static_cast<size_t>(DIFFICULTY_BLOCKS_COUNT));
+    timestamps.resize(blocks_count);
+    cumulative_difficulties.resize(blocks_count);
     size_t count = 0;
-    size_t max_i = timestamps.size()-1;
-    // get difficulties and timestamps from most recent blocks in alt chain
-    for (const auto &bei: boost::adaptors::reverse(alt_chain))
+    size_t max_i = timestamps.size() - 1;
+    for (const auto &alt_bei : boost::adaptors::reverse(alt_chain))
     {
-      timestamps[max_i - count] = bei.bl.timestamp;
-      cumulative_difficulties[max_i - count] = bei.cumulative_difficulty;
+      timestamps[max_i - count] = alt_bei.bl.timestamp;
+      cumulative_difficulties[max_i - count] = alt_bei.cumulative_difficulty;
       count++;
-      if(count >= DIFFICULTY_BLOCKS_COUNT)
+      if (count >= blocks_count)
         break;
     }
   }
 
-  // FIXME: This will fail if fork activation heights are subject to voting
   size_t target = get_ideal_hard_fork_version(bei.height) < 2 ? DIFFICULTY_TARGET_V1 : DIFFICULTY_TARGET_V2;
 
-  // calculate the difficulty target for the block and return it
+  if (use_fast)
+    return next_difficulty(timestamps, cumulative_difficulties, target, DIFFICULTY_WINDOW_FAST, DIFFICULTY_CUT_FAST);
   return next_difficulty(timestamps, cumulative_difficulties, target);
 }
 //------------------------------------------------------------------

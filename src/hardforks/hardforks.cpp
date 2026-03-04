@@ -35,6 +35,8 @@ const hardfork_t mainnet_hard_forks[] = {
   // Keep genesis at v1, then switch to RandomX (v16) immediately after.
   { 1, 1, 0, 0 },
   { 16, 2, 0, 1 },
+  // v17: fast difficulty (smaller window). Set height and time before release.
+  { 17, 50000, 0, 0 },
 };
 const size_t num_mainnet_hard_forks = sizeof(mainnet_hard_forks) / sizeof(mainnet_hard_forks[0]);
 const uint64_t mainnet_hard_fork_version_1_till = 1;
@@ -62,6 +64,7 @@ const hardfork_t testnet_hard_forks[] = {
   { 14, 1544659, 0, 1599069377 },
   { 15, 1982800, 0, 1652727000 },
   { 16, 1983520, 0, 1652813400 },
+  { 17, 1983600, 0, 1652813400 },
 };
 const size_t num_testnet_hard_forks = sizeof(testnet_hard_forks) / sizeof(testnet_hard_forks[0]);
 const uint64_t testnet_hard_fork_version_1_till = 624633;
@@ -86,5 +89,6 @@ const hardfork_t stagenet_hard_forks[] = {
   { 14, 676125, 0, 1598180818 },
   { 15, 1151000, 0, 1656629117 },
   { 16, 1151720, 0, 1656629118 },
+  { 17, 1151800, 0, 1656629118 },
 };
 const size_t num_stagenet_hard_forks = sizeof(stagenet_hard_forks) / sizeof(stagenet_hard_forks[0]);

@@ -109,11 +109,19 @@ BitMonero uses the same difficulty algorithm as Monero: the classic Cryptonote w
 - **Phase 1 (Option A):** Reduce window (e.g. to 120 blocks) and cut (e.g. 20) at a hardfork, with optional tightening of FTL.
 - **Phase 2 (optional):** In a later hardfork, switch to LWMA (Option B) with N = 90 and the same target, for even faster and smoother reaction.
 
-**Suggested next steps on branch `diff`:**
+---
 
-1. **Documentation (this file):** Keep this comparison and proposal in the repo (done).
-2. **Implement Option A** in a follow-up commit: change `DIFFICULTY_WINDOW` and `DIFFICULTY_CUT` in `src/cryptonote_config.h` and document the new values and hardfork plan; or
-3. **Implement Option B** (or a simplified LWMA) in `difficulty.cpp` + `blockchain.cpp` with a new constant set and hardfork gate.
+## 6. Implementation (Option A — done on branch `diff`)
+
+- **Constants** (`src/cryptonote_config.h`): `HF_VERSION_FAST_DIFFICULTY = 17`, `DIFFICULTY_WINDOW_FAST = 120`, `DIFFICULTY_CUT_FAST = 20`, `DIFFICULTY_BLOCKS_COUNT_FAST = 135`.
+- **Overload** (`src/cryptonote_basic/difficulty.cpp` + `difficulty.h`): `next_difficulty(timestamps, cumulative_difficulties, target_seconds, window_size, cut_size)` so the same formula is used with a smaller window/cut from HF 17.
+- **Blockchain** (`src/cryptonote_core/blockchain.cpp`): For `get_ideal_hard_fork_version(height) >= HF_VERSION_FAST_DIFFICULTY`, use the last 135 blocks and call the new overload with `(DIFFICULTY_WINDOW_FAST, DIFFICULTY_CUT_FAST)` in:
+  - `get_difficulty_for_next_block()`
+  - `get_next_difficulty_for_alternative_chain()`
+  - `recalculate_difficulties()`
+- **Hardfork** (`src/hardforks/hardforks.cpp`): Version **17** added on mainnet at height **50000** (placeholder — set final height and time before release). Testnet and stagenet have v17 at a placeholder height as well.
+
+Before release: set the real activation height (and time if used) for HF 17 in `hardforks.cpp`.
 
 **References:**
 
