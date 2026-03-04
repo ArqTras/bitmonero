@@ -87,6 +87,9 @@
 #define DIFFICULTY_CUT                                  60  // timestamps to cut after sorting
 #define DIFFICULTY_BLOCKS_COUNT                         DIFFICULTY_WINDOW + DIFFICULTY_LAG
 
+// Proposal (branch diff): faster difficulty adjustment. See docs/DIFFICULTY_ALGORITHM_COMPARISON_AND_PROPOSAL.md
+// Option A (smaller window): e.g. DIFFICULTY_WINDOW 120, DIFFICULTY_CUT 20 → ~2–4 h reaction vs current ~24 h.
+// Option B (LWMA): add next_difficulty_lwma() with N=90, same TARGET; activate at hardfork with reduced FTL.
 
 #define CRYPTONOTE_LOCKED_TX_ALLOWED_DELTA_SECONDS_V1   DIFFICULTY_TARGET_V1 * CRYPTONOTE_LOCKED_TX_ALLOWED_DELTA_BLOCKS
 #define CRYPTONOTE_LOCKED_TX_ALLOWED_DELTA_SECONDS_V2   DIFFICULTY_TARGET_V2 * CRYPTONOTE_LOCKED_TX_ALLOWED_DELTA_BLOCKS
